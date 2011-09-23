@@ -278,14 +278,14 @@ public abstract class AbstractRewritePomsPhase
             Element buildRoot = rootElement.getChild( "build", namespace );
             if ( buildRoot != null )
             {
-                rewritePlugins( project.getBuildPlugins(), buildRoot, mappedVersions, resolvedSnapshotDependencies,
+                rewritePlugins( project.getBuildPlugins(), buildRoot, namespace, mappedVersions, resolvedSnapshotDependencies,
                                 originalVersions, projectId, properties, result, releaseDescriptor );
                 if ( project.getPluginManagement() != null )
                 {
                     Element pluginsRoot = buildRoot.getChild( "pluginManagement", namespace );
                     if ( pluginsRoot != null )
                     {
-                        rewritePlugins( project.getPluginManagement().getPlugins(), pluginsRoot, mappedVersions,
+                        rewritePlugins( project.getPluginManagement().getPlugins(), pluginsRoot, namespace, mappedVersions,
                                         resolvedSnapshotDependencies, originalVersions, projectId, properties, result,
                                         releaseDescriptor );
                     }
@@ -445,6 +445,7 @@ public abstract class AbstractRewritePomsPhase
             for ( Iterator<Dependency> i = dependencies.iterator(); i.hasNext(); )
             {
                 Dependency dep = (Dependency) i.next();
+
                 String depId = ArtifactUtils.versionlessKey( dep.getGroupId(), dep.getArtifactId() );
                 if ( !dependenciesAlreadyChanged.contains( depId ) )
                 {
@@ -461,13 +462,15 @@ public abstract class AbstractRewritePomsPhase
         }
     }
 
-    private void rewritePlugins( List<Plugin> plugins, Element pluginRoot, Map mappedVersions, Map resolvedSnapshotDependencies,
-                                 Map originalVersions, String projectId, Element properties, ReleaseResult result,
-                                 ReleaseDescriptor releaseDescriptor )
+    private void rewritePlugins(List<Plugin> plugins, Element pluginsRoot, Namespace namespace, Map mappedVersions, Map resolvedSnapshotDependencies,
+            Map originalVersions, String projectId, Element properties, ReleaseResult result,
+            ReleaseDescriptor releaseDescriptor)
         throws ReleaseExecutionException, ReleaseFailureException
     {
         if ( plugins != null )
         {
+            // Gather all plugin dependencies for updating below
+            List allDependencies = new ArrayList();
             for ( Iterator<Plugin> i = plugins.iterator(); i.hasNext(); )
             {
                 Plugin plugin = i.next();
@@ -477,7 +480,29 @@ public abstract class AbstractRewritePomsPhase
                 {
                     updateDomVersion( plugin.getGroupId(), plugin.getArtifactId(), mappedVersions,
                                       resolvedSnapshotDependencies, plugin.getVersion(), originalVersions, "plugins",
-                                      "plugin", pluginRoot, projectId, properties, result, releaseDescriptor );
+                                      "plugin", pluginsRoot, projectId, properties, result, releaseDescriptor );
+                }
+
+                allDependencies.addAll(plugin.getDependencies());
+            }
+
+            // This is not really correct but works.
+            // We gather all dependencies from all plugins above and then we update this aggregate list of dependencies
+            // for each plugin here.  This makes the code perform extra unnecessary work, but doesn't hurt anything.
+            // The reason we do the extra work is because the code in the class assumes there is a single unique path
+            // to the bag of dependency elements to update, and that is not true when you have bag of plugins each containing
+            // a bag of dependencies.
+            if (!allDependencies.isEmpty()) {
+                Element pluginsElement = pluginsRoot.getChild("plugins", namespace);
+                if (pluginsElement != null) {
+                    for (Element pluginElement : (List<Element>) pluginsElement.getChildren("plugin", namespace)) {
+                        Element dependenciesElement = pluginElement.getChild("dependencies", namespace);
+                        if ( dependenciesElement != null )
+                        {
+                            rewriteDependencies(allDependencies, pluginElement, mappedVersions, resolvedSnapshotDependencies, originalVersions, projectId, properties, result, releaseDescriptor);
+                        }
+
+                    }
                 }
             }
         }
